@@ -1,61 +1,88 @@
 # fzf-fasd integration
-# author: @wookayin
-# MIT License (c) 2017-2020
-# vim: set ft=zsh ts=2 sts=2 ts=2:
+# original author: @wookayin
+# rewrote: @sk1418
+# MIT License (c) 2017-2025
 
 
 # fasd+fzf integration (ZSH only)
-__fzf_fasd_zsh_completion() {
-  local args cmd slug selected
-
-  args=(${(z)LBUFFER})
-  cmd=${args[1]}
-
+#
+#--------------------------------------------------
+# z, v command completion
+#--------------------------------------------------
+function __zv_fasd_completion() {
+  local args=(${(z)LBUFFER})
+  local cmd=${args[1]}
   # triggered only at the command 'z'; fallback to default
-  if [[ "$cmd" != "z" ]]; then
+  if [[ "$cmd" != "z" && "$cmd" != "v" ]]; then
     zle ${__fzf_fasd_default_completion:-expand-or-complete}
     return
   fi
+  case "$cmd" in
+    'z') 
+      zle __fasd_to_fzf_completion 'dir' 1 ;;
+    'v')
+      zle __fasd_to_fzf_completion 'file' 1 ;;
+  esac
+}
 
-  if [[ "${#args}" -gt 1 ]]; then
+#--------------------------------------------------
+# fasd dir on fzf completion
+#--------------------------------------------------
+function fasd_files_to_fzf() {
+  zle __fasd_to_fzf_completion 'file' 0
+}
+
+#--------------------------------------------------
+# fasd dir on fzf completion
+#--------------------------------------------------
+function fasd_dirs_to_fzf() {
+  zle __fasd_to_fzf_completion 'dir' 0
+}
+
+#--------------------------------------------------
+# fasd on fzf
+# arg1: type (files|dir)
+# arg2: if enable query: 0 (No)/ 1 (yes)
+#--------------------------------------------------
+function __fasd_to_fzf_completion(){
+  local fasd_type="$1" # type: dir/file
+  local with_query="$2" # 0 (No)/ 1 (yes)
+  local args slug selected
+  args=(${(z)LBUFFER})
+
+  if [[ ! -z $with_query && "${#args}" -gt 1 ]]; then
     eval "slug=${args[-1]}"
+    unset "args[-1]"
   fi
 
-  # generate completion list from fasd
-  local matches_count
-  matches_count=$(__fzf_fasd_generate_matches "$slug" | head | wc -l)
-  if [[ "$matches_count" -gt 1 ]]; then
-    # >1 results, invoke fzf
-    selected=$(__fzf_fasd_generate_matches "$slug" \
-        | FZF_DEFAULT_OPTS="--height ${FZF_TMUX_HEIGHT:-40%} $FZF_DEFAULT_OPTS $FZF_FASD_OPTS" \
-          fzf --query="$slug" --reverse --bind 'shift-tab:up,tab:down'
-    )
-  elif [[ "$matches_count" -eq 1 ]]; then
-    # 1 result, just complete it
-    selected=$(__fzf_fasd_generate_matches "$slug")
-  else;
-    # no result
-    return
-  fi
-  #echo [DEBUG] $selected $matches_count
+  local result=""
+  case "$fasd_type" in
+    'dir')
+      result=$(fasd -dlR "$slug");;
+    'file')
+      result=$(fasd -flR "$slug");;
+  esac
 
+  local selected=$(echo "$result" | __fzf "$slug")
   # return completion result with $selected
   if [[ -n "$selected" ]]; then
-    selected=$(printf %q "$selected")
-    if [[ "$selected" != */ ]]; then
+    if [[ $fasd_type == "dir" && "$selected" != */ ]]; then
       selected="${selected}/"
     fi
-    LBUFFER="$cmd $selected"
+    selected=$(printf %q "$selected")
+    LBUFFER="${args[@]} $selected"
+  else
+    return
   fi
 
   zle redisplay
   typeset -f zle-line-init >/dev/null && zle zle-line-init
 }
 
-__fzf_fasd_generate_matches() {
-  # currently only 'z' (fasd -d) is supported; list all dirs (without score)
-  # -R: make entries with higher score comes earlier
-  fasd -d -l -R "$@"
+# fzf command for internal using
+function __fzf() {
+  FZF_DEFAULT_OPTS="--height ${FZF_TMUX_HEIGHT:-40%} $FZF_DEFAULT_OPTS $FZF_FASD_OPTS" 
+  fzf --query="$1" --reverse --exit-0 --select-1 --bind 'shift-tab:up,tab:down' 
 }
 
 [ -z "$__fzf_fasd_default_completion" ] && {
@@ -64,5 +91,15 @@ __fzf_fasd_generate_matches() {
   unset binding
 }
 
-zle      -N  __fzf_fasd_zsh_completion
-bindkey '^I' __fzf_fasd_zsh_completion
+zle -N  __fasd_to_fzf_completion
+
+zle     -N     fasd_files_to_fzf
+bindkey '^X^F' fasd_files_to_fzf
+
+zle     -N     fasd_dirs_to_fzf
+bindkey '^X^d' fasd_dirs_to_fzf
+
+zle     -N   __zv_fasd_completion
+bindkey '^I' __zv_fasd_completion
+
+# vim: ft=sh ts=2 sw=2 et
